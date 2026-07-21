@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Супер Марио - Финальная Версия</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #111;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #fff;
+            overflow: hidden;
+        }
+        #gameContainer {
+            position: relative;
+            width: 800px;
+            height: 400px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        canvas {
+            border: 4px solid #fff;
+            background: #5c94fc;
+        }
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 800px;
+            height: 400px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.85);
+            box-sizing: border-box;
+            text-align: center;
+        }
+        h1 {
+            font-size: 52px;
+            color: #ff5722;
+            margin: 0 0 10px 0;
+            text-shadow: 3px 3px #000;
+        }
+        p {
+            font-size: 18px;
+            margin: 5px 0 25px 0;
+            color: #ccc;
+        }
+        button {
+            padding: 14px 40px;
+            font-size: 22px;
+            background: #4caf50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 30px;
+            font-weight: bold;
+            box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
+            transition: 0.2s ease;
+        }
+        button:hover {
+            background: #45a049;
+            transform: scale(1.05);
+        }
+        #controlsHint {
+            margin-top: 30px;
+            font-size: 14px;
+            color: #888;
+            border-top: 1px solid #444;
+            padding-top: 15px;
+            width: 60%;
+        }
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+
+<div id="gameContainer">
+    <!-- ГЛАВНОЕ МЕНЮ -->
+    <div id="menuScreen" class="screen">
+        <h1>SUPER MARIO COMPLETE</h1>
+        <p>С блоками «?», грибами роста и полноценной физикой</p>
+        <button id="startBtn">НАЧАТЬ ИГРУ</button>
+        <div id="controlsHint">🔍 Управление: Стрелки Влево/Вправо — бег, Стрелка Вверх — прыжок. Прыгайте на врагов сверху!</div>
+    </div>
+
+    <!-- ИГРОВОЙ ХОЛСТ -->
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+
+    <!-- ЭКРАН GAME OVER -->
+    <div id="gameOverScreen" class="screen hidden">
+        <h1 style="color: #f44336;">ИГРА ОКОНЧЕНА</h1>
+        <p id="finalScore" style="font-size: 22px;">Монеты: 0</p>
+        <button id="restartBtn">ПОПРОБОВАТЬ СНОВА</button>
+    </div>
+
+    <!-- ЭКРАН ПОБЕДЫ -->
+    <div id="winScreen" class="screen hidden">
+        <h1 style="color: #ffeb3b; text-shadow: 3px 3px #5d4037;">ВЫ ПОБЕДИЛИ! 🎉</h1>
+        <p id="winScore" style="font-size: 24px;">Вы прошли уровень и собрали монет: 0</p>
+        <button id="winRestartBtn">ИГРАТЬ ЕЩЕ РАЗ</button>
+    </div>
+</div>
+
+<script>
+// Поиск HTML-элементов для работы JS
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const menuScreen = document.getElementById('menuScreen');
+const gameOverScreen = document.getElementById('gameOverScreen');
+const winScreen = document.getElementById('winScreen');
+const startBtn = document.getElementById('startBtn');
+const restartBtn = document.getElementById('restartBtn');
+const winRestartBtn = document.getElementById('winRestartBtn');
+const finalScoreText = document.getElementById('finalScore');
+const winScoreText = document.getElementById('winScore');
+
+// Игровые Глобальные Настройки
+const GRAVITY = 0.6;
+let gameState = 'MENU'; 
+let score = 0;
+let lives = 3;
+let cameraX = 0;
+
+// Списки объектов на уровне
+let player = {};
+let platforms = [];
+let questionBlocks = [];
+let mushrooms = [];
+let coins = [];
+let enemies = [];
+let clouds = [];
+let flagPole = {};
+let keys = {};
+// Слушатели клавиатуры (запоминают, какие клавиши зажаты)
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+// Привязка функций к кнопкам интерфейса
+startBtn.addEventListener('click', startGame);
+restartBtn.addEventListener('click', startGame);
+winRestartBtn.addEventListener('click', startGame);
+
+// Функция запуска / перезапуска всей игры
+function startGame() {
+    menuScreen.classList.add('hidden');
+    gameOverScreen.classList.add('hidden');
+    winScreen.classList.add('hidden');
+    gameState = 'PLAYING';
+    score = 0;
+    lives = 3;
+    initLevel(true); // true означает полный сброс уровня
+}
+
+// Генерация или перезапуск уровня при потере жизни
+function initLevel(fullReset = false) {
+    cameraX = 0; // Сброс камеры на начало
+    
+    // Проверяем, был ли Марио большим до смерти на чекпоинте
+    const isSuper = (!fullReset && player.isSuper) ? true : false;
+    
+    // Создание объекта Игрока
+    player = {
+        x: 100,
+        y: 200,
+        width: 30,
+        height: isSuper ? 55 : 40, // Рост зависит от статуса Супер-Марио
+        velX: 0,
+        velY: 0,
+        speed: 4.5,
+        jumpForce: 12.5,
+        grounded: false,
+        invulnerable: 0, // Таймер неуязвимости (в кадрах)
+        isSuper: isSuper
+    };
+
+    // Декоративные Облака (координаты и размер)
+    clouds = [
+        {x: 150, y: 60, scale: 0.8}, {x: 500, y: 40, scale: 1.2},
+        {x: 900, y: 70, scale: 0.9}, {x: 1300, y: 50, scale: 1.1},
+        {x: 1700, y: 60, scale: 1}
+    ];
+
+    // Обычные твердые платформы и земля
+    platforms = [
+        { x: 0, y: 360, width: 2200, height: 40 }, // Главная земля
+        { x: 250, y: 260, width: 120, height: 20 },
+        { x: 750, y: 260, width: 120, height: 20 },
+        { x: 1100, y: 260, width: 140, height: 20 },
+        { x: 1650, y: 260, width: 150, height: 20 }
+    ];
+
+    // Блоки со знаком вопроса («?») и монеты сбрасываются только при новой игре
+    if (fullReset) {
+        questionBlocks = [
+            { x: 300, y: 160, width: 32, height: 32, hasMushroom: false, empty: false },
+            { x: 500, y: 180, width: 32, height: 32, hasMushroom: true,  empty: false }, // Блок с грибом!
+            { x: 532, y: 180, width: 32, height: 32, hasMushroom: false, empty: false },
+            { x: 800, y: 160, width: 32, height: 32, hasMushroom: false, empty: false },
+            { x: 1200, y: 160, width: 32, height: 32, hasMushroom: false, empty: false }
+        ];
+        mushrooms = []; // Список активированных грибов на экране
+        coins = [
+            { x: 260, y: 220, collected: false }, { x: 280, y: 220, collected: false },
+            { x: 760, y: 220, collected: false }, { x: 780, y: 220, collected: false }
+        ];
+    }
+
+    // Финишный Флагшток в конце уровня
+    flagPole = { x: 2000, y: 100, width: 10, height: 260, flagY: 120, flagWidth: 40, flagHeight: 30 };
+
+    // Расстановка врагов (Гумбы)
+    enemies = [
+        { x: 420, y: 330, width: 30, height: 30, speed: -1.5, alive: true },
+        { x: 650, y: 330, width: 30, height: 30, speed: -1.8, alive: true },
+        { x: 950, y: 330, width: 30, height: 30, speed: -1.5, alive: true },
+        { x: 1350, y: 330, width: 30, height: 30, speed: -2, alive: true },
+        { x: 1800, y: 330, width: 30, height: 30, speed: -2.2, alive: true }
+    ];
+}
+
+// Обработка получения урона игроком
+function handlePlayerHit() {
+    if (player.invulnerable > 0) return; // Если мигает — урон не идет
+
+    if (player.isSuper) {
+        // Большой Марио не умирает, а просто уменьшается
+        player.isSuper = false;
+        player.height = 40;
+        player.y += 15; // Сдвиг вниз, чтобы ноги остались на земле
+        player.invulnerable = 90; // Даем 1.5 секунды неуязвимости
+    } else {
+        // Маленький Марио теряет жизнь
+        lives--;
+        if (lives <= 0) {
+            gameState = 'GAMEOVER';
+            finalScoreText.textContent = `Собрано монет: ${score}`;
+            gameOverScreen.classList.remove('hidden');
+        } else {
+            initLevel(false); // Перезапуск уровня без сброса монет и блоков
+            player.invulnerable = 90;
+        }
+    }
+}
+
+// Функция проверки столкновения двух объектов (AABB-коллизия)
+function checkCollision(obj1, obj2) {
+    const w2 = obj2.width || 16;
+    const h2 = obj2.height || 16;
+    return obj1.x < obj2.x + w2 &&
+           obj1.x + obj1.width > obj2.x &&
+           obj1.y < obj2.y + h2 &&
+           obj1.y + obj1.height > obj2.y;
+}
+// Основная функция обновления данных (вызывается каждый кадр)
+function update() {
+    if (gameState !== 'PLAYING') return;
+
+    // Уменьшаем таймер неуязвимости игрока
+    if (player.invulnerable > 0) player.invulnerable--;
+
+    // Бег влево / вправо
+    if (keys['ArrowRight']) player.velX = player.speed;
+    else if (keys['ArrowLeft']) player.velX = -player.speed;
+    else player.velX = 0;
+
+    // Прыжок (работает только если игрок стоит на твердой поверхности)
+    if (keys['ArrowUp'] && player.grounded) {
+        player.velY = -player.jumpForce;
+        player.grounded = false;
+    }
+
+    // Применение гравитации к игроку
+    player.velY += GRAVITY;
+    player.x += player.velX;
+    player.y += player.velY;
+
+    // Ограничение: нельзя уйти за левый край экрана
+    if (player.x < 0) player.x = 0;
+    
+    // Плавное движение камеры вслед за игроком
+    if (player.x > canvas.width / 2) cameraX = player.x - canvas.width / 2;
+
+    player.grounded = false; // Сбрасываем флаг земли перед проверкой коллизий
+
+    // Физика взаимодействия с обычными платформами
+    for (let plat of platforms) {
+        if (checkCollision(player, plat)) {
+            if (player.velY > 0 && player.y + player.height - player.velY <= plat.y) {
+                player.y = plat.y - player.height;
+                player.velY = 0;
+                player.grounded = true;
+            } else if (player.velY < 0 && player.y - player.velY >= plat.y + plat.height) {
+                player.y = plat.y + plat.height;
+                player.velY = 0;
+            }
+        }
+    }
+
+    // Столкновения с блоками «?» (Физика стен + удар головой снизу)
+    for (let block of questionBlocks) {
+        if (checkCollision(player, block)) {
+            // Приземление на блок сверху
+            if (player.velY > 0 && player.y + player.height - player.velY <= block.y) {
+                player.y = block.y - player.height;
+                player.velY = 0;
+                player.grounded = true;
+            } 
+            // Удар головой снизу!
+            else if (player.velY < 0 && player.y - player.velY >= block.y + block.height) {
+                player.y = block.y + block.height;
+                player.velY = 0;
+
+                // Если блок еще не был выбит
+                if (!block.empty) {
+                    block.empty = true;
+                    if (block.hasMushroom) {
+                        // Спавним Гриб над блоком
+                        mushrooms.push({ x: block.x, y: block.y - 32, width: 32, height: 32, speedX: 2, velY: 0 });
+                    } else {
+                        // Спавним обычную монетку
+                        score++;
+                    }
+                }
+            }
+            // Боковое столкновение (чтобы нельзя было пройти сквозь блок)
+            else if (player.velX > 0 && player.x + player.width - player.velX <= block.x) {
+                player.x = block.x - player.width;
+            } else if (player.velX < 0 && player.x - player.velX >= block.x + block.width) {
+                player.x = block.x + block.width;
+            }
+        }
+    }
+
+    // Логика поведения Гриба (Катится, падает и увеличивает Марио)
+    for (let i = mushrooms.length - 1; i >= 0; i--) {
+        let shroom = mushrooms[i];
+        shroom.velY += GRAVITY;
+        shroom.x += shroom.speedX;
+        shroom.y += shroom.velY;
+
+        // Физика земли для катящегося гриба
+        for (let plat of platforms) {
+            if (checkCollision(shroom, plat)) {
+                if (shroom.velY > 0) {
+                    shroom.y = plat.y - shroom.height;
+                    shroom.velY = 0;
+                }
+            }
+        }
+        
+        // Разворот гриба от невидимых границ карты
+        if (shroom.x < 0 || shroom.x > 2100) shroom.speedX *= -1;
+
+        // Марио подбирает гриб
+        if (checkCollision(player, shroom)) {
+            mushrooms.splice(i, 1); // Удаляем гриб из игры
+            if (!player.isSuper) {
+                player.isSuper = true;
+                player.height = 55; // Марио физически увеличивается
+                player.y -= 15;     // Корректировка, чтобы не застрять в земле
+            }
+            score += 5; // Бонус за гриб
+        }
+    }
+
+    // Сбор обычных круглых монет на уровне
+    for (let coin of coins) {
+        if (!coin.collected && checkCollision(player, coin)) {
+            coin.collected = true;
+            score++;
+        }
+    }
+
+    // Логика Врагов (Движение и смерть от прыжка сверху)
+    for (let enemy of enemies) {
+        if (!enemy.alive) continue;
+        enemy.x += enemy.speed;
+        
+        // Разворот патрулирующих врагов у краев платформ
+        if (enemy.x < 200 || enemy.x > 1950) enemy.speed *= -1;
+
+        if (checkCollision(player, enemy)) {
+            // Если игрок падает на врага сверху (с запасом в 12 пикселей)
+            if (player.velY > 0 && player.y + player.height - player.velY <= enemy.y + 12) {
+                enemy.alive = false;
+                player.velY = -player.jumpForce / 1.4; // Пружинящий отскок вверх
+            } else {
+                handlePlayerHit(); // Марио получает урон сбоку
+            }
+        }
+    }
+
+    // Проверка победы (Достижение флагштока)
+    if (checkCollision(player, flagPole)) {
+        gameState = 'WIN';
+        winScoreText.textContent = `Вы благополучно завершили уровень! Собрано монет: ${score}`;
+        winScreen.classList.remove('hidden');
+    }
+
+    // Падение в бездну (под карту)
+    if (player.y > canvas.height) handlePlayerHit();
+}
+
+// Функция отрисовки всей графики на холсте Canvas
+function draw() {
+    // Полная очистка экрана перед каждым новым кадром
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    // Смещаем весь холст влево на величину движения камеры
+    ctx.translate(-cameraX, 0);
+
+    // 1. Отрисовка декоративных облаков
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    for (let cloud of clouds) {
+        ctx.beginPath();
+        let cx = cloud.x; let cy = cloud.y;
+        ctx.arc(cx, cy, 20 * cloud.scale, 0, Math.PI * 2);
+        ctx.arc(cx + 25 * cloud.scale, cy - 10 * cloud.scale, 25 * cloud.scale, 0, Math.PI * 2);
+        ctx.arc(cx + 50 * cloud.scale, cy, 20 * cloud.scale, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // 2. Отрисовка земли и твердых платформ
+    for (let plat of platforms) {
+        ctx.fillStyle = '#9e6a43'; ctx.fillRect(plat.x, plat.y, plat.width, plat.height); // Основание земли
+        ctx.fillStyle = '#4caf50'; ctx.fillRect(plat.x, plat.y, plat.width, 6);              // Трава сверху
+    }
+
+    // 3. Отрисовка интерактивных блоков «?»
+    for (let block of questionBlocks) {
+        if (!block.empty) {
+            ctx.fillStyle = '#ffc107'; // Золотой нетронутый блок
+            ctx.fillRect(block.x, block.y, block.width, block.height);
+            ctx.strokeStyle = '#ff5722'; ctx.lineWidth = 2; ctx.strokeRect(block.x, block.y, block.width, block.height);
+            // Отрисовка знака вопроса по центру
+            ctx.fillStyle = '#ff5722'; ctx.font = 'bold 20px Arial'; ctx.fillText('?', block.x + 11, block.y + 24);
+        } else {
+            ctx.fillStyle = '#7d5638'; // Пустой коричневый блок после удара
+            ctx.fillRect(block.x, block.y, block.width, block.height);
+            ctx.strokeStyle = '#4e342e'; ctx.lineWidth = 2; ctx.strokeRect(block.x, block.y, block.width, block.height);
+        }
+    }
+
+    // 4. Отрисовка катящегося Волшебного Гриба
+    for (let shroom of mushrooms) {
+        ctx.fillStyle = '#e53935'; // Красная шляпка
+        ctx.beginPath(); ctx.arc(shroom.x + 16, shroom.y + 12, 16, Math.PI, 0); ctx.fill();
+        ctx.fillStyle = '#fff';     // Пятнышки на грибе
+        ctx.beginPath(); ctx.arc(shroom.x + 10, shroom.y + 6, 3, 0, Math.PI * 2); ctx.arc(shroom.x + 22, shroom.y + 6, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#f5f5f5'; // Светлая ножка
+        ctx.fillRect(shroom.x + 10, shroom.y + 12, 12, 20);
+    }
+
+    // 5. Отрисовка финишного флагштока
+    ctx.fillStyle = '#b0bec5'; ctx.fillRect(flagPole.x, flagPole.y, flagPole.width, flagPole.height); // Шест
+    ctx.fillStyle = '#ff5722'; ctx.fillRect(flagPole.x + flagPole.width, flagPole.flagY, flagPole.flagWidth, flagPole.flagHeight); // Флаг
+
+    // 6. Отрисовка обычных круглых монет
+    ctx.fillStyle = '#ffeb3b';
+    for (let coin of coins) {
+        if (!coin.collected) {
+            ctx.beginPath(); ctx.arc(coin.x + 8, coin.y + 8, 8, 0, Math.PI * 2); ctx.fill();
+        }
+    }
+
+    // 7. Отрисовка злых врагов (Гумбы)
+    for (let enemy of enemies) {
+        if (enemy.alive) {
+            ctx.fillStyle = '#673ab7'; ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height); // Тело
+            ctx.fillStyle = '#fff'; ctx.fillRect(enemy.x + 4, enemy.y + 6, 5, 8); ctx.fillRect(enemy.x + 21, enemy.y + 6, 5, 8); // Глаза
+        }
+    }
+
+    // 8. Отрисовка игрока (Марио)
+    // Эффект мигания: если игрок неуязвим, рисуем его только каждый 5-й кадр
+    if (player.invulnerable === 0 || Math.floor(player.invulnerable / 5) % 2 === 0) {
+        ctx.fillStyle = player.isSuper ? '#0d47a1' : '#e53935'; // Синий цвет для Супер-Марио, красный для обычного
+        ctx.fillRect(player.x, player.y, player.width, player.height);
+        // Кепка
+        ctx.fillStyle = '#b71c1c'; ctx.fillRect(player.x, player.y, player.width, 8);
+        // Лицо
+        ctx.fillStyle = '#ffcc80'; ctx.fillRect(player.x + 8, player.y + 8, 16, 12);
+        // Усы
+        ctx.fillStyle = '#4e342e'; ctx.fillRect(player.x + 14, player.y + 14, 10, 4);
+    }
+
+    ctx.restore(); // Возвращаем матрицу трансформации холста обратно
+
+    // 9. Отрисовка статичного интерфейса (HUD), который не двигается за камерой
+    if (gameState === 'PLAYING') {
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 18px "Segoe UI", Arial';
+        ctx.fillText(`💰 МОНЕТЫ: ${score}`, 20, 35);
+        if (player.isSuper) {
+            ctx.fillStyle = '#ffeb3b'; ctx.fillText(`🔥 СТАТУС: СУПЕР`, 220, 35);
+        }
+        ctx.fillStyle = '#ff1744'; ctx.fillText(`ЖИЗНИ: ${'❤️'.repeat(lives)}`, 620, 35);
+    }
+}
+
+// Главный бесконечный игровой цикл (вызывается примерно 60 раз в секунду)
+function gameLoop() {
+    update(); // Математика
+    draw();   // Графика
+    requestAnimationFrame(gameLoop); // Запрос следующего кадра анимации
+}
+
+// Самый первый запуск игрового цикла при открытии страницы
+gameLoop();
+</script>
+
+</body>
+</html>
+    
